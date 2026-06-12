@@ -1,7 +1,20 @@
 # -*- coding: utf-8 -*-
+# 샘플 소송기록 PDF 생성기. 한글 임베딩 호환성을 위해 AAT 테이블이 없는
+# 표준 TTF(나눔바른고딕)를 사용한다. (AppleSDGothicNeo 등 AAT 폰트는 일부
+# 뷰어에서 글리프가 깨져 빈 페이지처럼 보이므로 사용하지 않는다.)
+import os
 from fpdf import FPDF
 
-FONT = "/tmp/AppleSDGothicNeo0.ttf"
+FONT_CANDIDATES = [
+    os.path.expanduser("~/Library/Fonts/NanumBarunGothic.ttf"),
+    os.path.expanduser("~/Library/Fonts/NanumGothic.ttf"),
+    "/Library/Fonts/NanumGothic.ttf",
+]
+FONT = next((f for f in FONT_CANDIDATES if os.path.exists(f)), None)
+if not FONT:
+    raise SystemExit("나눔 계열 TTF 폰트를 찾을 수 없습니다: " + ", ".join(FONT_CANDIDATES))
+
+OUT = os.path.join(os.path.dirname(__file__), "..", "public", "sample", "sample_litigation.pdf")
 
 pages = [
     ("소장", """소               장
@@ -83,10 +96,11 @@ pages = [
 ]
 
 pdf = FPDF()
-pdf.add_font("AG", "", FONT)
+pdf.add_font("NB", "", FONT)
 for title, body in pages:
     pdf.add_page()
-    pdf.set_font("AG", size=11)
+    pdf.set_font("NB", size=11)
     pdf.multi_cell(0, 7, body)
-pdf.output("/tmp/sample_litigation.pdf")
-print("created /tmp/sample_litigation.pdf")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
+pdf.output(OUT)
+print("created", os.path.normpath(OUT), "using font", os.path.basename(FONT))
