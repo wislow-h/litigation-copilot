@@ -37,7 +37,12 @@ export const openaiProvider: PipelineProvider = {
   available: () => !!process.env.OPENAI_API_KEY,
 
   async run(caseId, files, onProgress): Promise<PipelineResult> {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+    // 대용량 스캔본은 분석 요청이 길어지므로 재시도·타임아웃을 넉넉히 잡는다.
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY!,
+      maxRetries: 5,
+      timeout: 20 * 60 * 1000,
+    });
     const notes: string[] = [];
     const t0 = Date.now();
 

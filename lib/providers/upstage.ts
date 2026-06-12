@@ -41,7 +41,9 @@ export const upstageProvider: PipelineProvider = {
 
     // ② 청크별 이벤트 추출 (Solar Pro 3, map)
     const t1 = Date.now();
-    const llm = new OpenAI({ apiKey, baseURL: BASE_URL });
+    // 대용량 기록은 Solar 호출이 여러 번·장시간 일어나므로 재시도·타임아웃을 넉넉히.
+    // (연결 끊김 한 번에 전체 파이프라인이 죽지 않도록)
+    const llm = new OpenAI({ apiKey, baseURL: BASE_URL, maxRetries: 5, timeout: 15 * 60 * 1000 });
     const chunks = parsedDocs.flatMap((doc) =>
       splitText(doc.markdown, CHUNK_CHARS).map((text, idx, arr) => ({
         label: arr.length > 1 ? `${doc.label} (${idx + 1}/${arr.length})` : doc.label,
@@ -50,17 +52,30 @@ export const upstageProvider: PipelineProvider = {
     );
 
     const extracted: ExtractionChunk[] = [];
+    let failedChunks = 0;
     for (const [i, chunk] of chunks.entries()) {
       await onProgress("analyzing", `이벤트 추출 중 (${i + 1}/${chunks.length} 청크)`);
-      extracted.push(
-        await chatJSON<ExtractionChunk>(
-          llm, LLM_MODEL,
-          EXTRACT_SYSTEM,
-          extractUserPrompt(chunk.label, chunk.text),
-          "extraction",
-          extractionSchema as unknown as Record<string, unknown>
-        )
-      );
+      try {
+        extracted.push(
+          await chatJSON<ExtractionChunk>(
+            llm, LLM_MODEL,
+            EXTRACT_SYSTEM,
+            extractUserPrompt(chunk.label, chunk.text),
+            "extraction",
+            extractionSchema as unknown as Record<string, unknown>
+          )
+        );
+      } catch (e) {
+        // 한 청크가 끝내 실패해도 나머지로 분석을 이어간다 (대용량 견고성)
+        failedChunks++;
+        console.error(`[upstage] 청크 ${i + 1}/${chunks.length} 추출 실패`, e);
+      }
+    }
+    if (failedChunks > 0) {
+      notes.push(`${chunks.length}개 구간 중 ${failedChunks}개는 추출에 실패해 결과에서 제외했습니다. (대용량 처리 중 일부 요청 실패)`);
+    }
+    if (extracted.length === 0) {
+      throw new Error("모든 구간의 이벤트 추출에 실패했습니다. 잠시 후 '다시 분석'을 눌러 재시도해 주세요.");
     }
 
     // ③ 종합 분석 (reduce)
