@@ -43,10 +43,30 @@ export default function HomePage() {
       .then(setCases);
   }, []);
 
+  const [loadingSample, setLoadingSample] = useState(false);
+
   const addFiles = useCallback((incoming: FileList | File[]) => {
     setFiles((prev) => [...prev, ...Array.from(incoming)]);
     setError("");
   }, []);
+
+  // 샘플 소송기록(대여금 1심 패소 시나리오)을 업로드 목록에 바로 올린다
+  async function loadSample() {
+    if (loadingSample) return;
+    setLoadingSample(true);
+    setError("");
+    try {
+      const res = await fetch("/sample/sample_litigation.pdf");
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      addFiles([new File([blob], "sample_litigation.pdf", { type: "application/pdf" })]);
+      if (!title) setTitle("샘플: 대여금 사건 (1심 패소)");
+    } catch {
+      setError("샘플 파일을 불러오지 못했습니다.");
+    } finally {
+      setLoadingSample(false);
+    }
+  }
 
   async function submit() {
     if (files.length === 0 || selected.size === 0 || uploading) return;
@@ -134,13 +154,34 @@ export default function HomePage() {
           />
         </div>
 
+        {/* 샘플 데이터: 직접 올릴 기록이 없어도 바로 체험 */}
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+          <span className="text-slate-500">처음이신가요? 예시 소송기록(대여금 1심 패소)으로 체험해 보세요.</span>
+          <button
+            onClick={loadSample}
+            disabled={loadingSample}
+            className="rounded-md bg-indigo-100 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-200 disabled:opacity-50"
+          >
+            {loadingSample ? "불러오는 중…" : "샘플로 바로 체험"}
+          </button>
+          <a
+            href="/sample/sample_litigation.pdf"
+            download
+            className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-white"
+          >
+            ⬇ 샘플 PDF 다운로드
+          </a>
+        </div>
+
         {files.length > 0 && (
           <ul className="space-y-1">
             {files.map((f, i) => (
               <li key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
                 <span className="truncate">{f.name}</span>
                 <span className="ml-3 flex shrink-0 items-center gap-3 text-slate-400">
-                  {(f.size / 1024 / 1024).toFixed(1)}MB
+                  {f.size < 1024 * 1024
+                    ? `${Math.max(1, Math.round(f.size / 1024))}KB`
+                    : `${(f.size / 1024 / 1024).toFixed(1)}MB`}
                   <button
                     onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
                     className="text-slate-400 hover:text-red-500"

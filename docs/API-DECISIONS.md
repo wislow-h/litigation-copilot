@@ -3,6 +3,26 @@
 > 두 파이프라인은 **동일한 프롬프트([lib/prompts.ts](../lib/prompts.ts))와 동일한 출력 스키마([lib/analysis-schema.ts](../lib/analysis-schema.ts))** 를 쓰도록 맞췄습니다. 그래야 "API/모델 자체의 차이"만 비교 화면에 드러나기 때문입니다.
 >
 > 구현 위치: Upstage = [lib/providers/upstage.ts](../lib/providers/upstage.ts), OpenAI = [lib/providers/openai.ts](../lib/providers/openai.ts)
+>
+> 🧪 **직접 체험:** 홈 화면의 **"샘플로 바로 체험"** 또는 **[샘플 소송기록 PDF 다운로드](../public/sample/sample_litigation.pdf)** (대여금 1심 패소 시나리오, 3페이지). 생성 스크립트: [scripts/make_sample_pdf.py](../scripts/make_sample_pdf.py)
+
+---
+
+## 사용한 API 공식 문서 (클릭 시 이동)
+
+**Upstage**
+- 📄 [Document Parse](https://console.upstage.ai/docs/capabilities/document-parse) — 문서 파싱·OCR (`/v1/document-digitization`)
+- 🧩 [Universal Information Extraction](https://console.upstage.ai/docs/capabilities/information-extraction/universal-information-extraction) — 스키마 기반 정보 추출 (Phase 2 예정)
+- 💬 [Chat (Solar LLM)](https://console.upstage.ai/docs/capabilities/chat) — `/v1/chat/completions`, OpenAI 호환
+- 🌟 [Solar Pro 3 소개](https://www.upstage.ai/blog/en/solar-pro-3-0323) — 모델 스펙·한국어 성능
+- 🔑 [API 콘솔·키 발급](https://console.upstage.ai) · [요금](https://www.upstage.ai/pricing/api)
+
+**OpenAI**
+- 📥 [File inputs (PDF)](https://platform.openai.com/docs/guides/pdf-files) — Responses API에 파일 직접 입력
+- 🗂️ [Files API](https://platform.openai.com/docs/api-reference/files) — `/v1/files` 업로드
+- 🧱 [Structured Outputs](https://platform.openai.com/docs/guides/structured-outputs) — `json_schema` strict
+- 🧠 [Responses API](https://platform.openai.com/docs/api-reference/responses) · [Models (GPT-5.5)](https://platform.openai.com/docs/models)
+- 🔑 [API 키 발급](https://platform.openai.com/api-keys)
 
 ---
 
@@ -10,8 +30,8 @@
 
 | 단계 | Upstage | OpenAI | 공통 결정 |
 |------|---------|--------|-----------|
-| ① 문서 파싱·OCR | **Document Parse** (`/v1/document-digitization`) | (전용 API 없음) **Files API** + `pdf-lib` 분할 | — |
-| ② 이벤트 추출 | **Solar Pro 3** (`solar-pro3`) + JSON Schema | **GPT-5.5** Responses API + Structured Outputs | 구조화 출력(JSON Schema) 강제 |
+| ① 문서 파싱·OCR | **[Document Parse](https://console.upstage.ai/docs/capabilities/document-parse)** (`/v1/document-digitization`) | (전용 API 없음) **[Files API](https://platform.openai.com/docs/api-reference/files)** + `pdf-lib` 분할 | — |
+| ② 이벤트 추출 | **[Solar Pro 3](https://console.upstage.ai/docs/capabilities/chat)** (`solar-pro3`) + JSON Schema | **[GPT-5.5](https://platform.openai.com/docs/guides/pdf-files)** Responses API + [Structured Outputs](https://platform.openai.com/docs/guides/structured-outputs) | 구조화 출력(JSON Schema) 강제 |
 | ③ 타임라인·옵션 종합 | **Solar Pro 3** | **GPT-5.5** | 동일 프롬프트·스키마 |
 | SDK | `openai` SDK (`base_url` 교체) | `openai` SDK | 단일 SDK로 양쪽 호출 |
 
@@ -56,6 +76,67 @@
 - **Upstage:** Solar Pro 3 (reduce 단계) / **OpenAI:** GPT-5.5
 - **왜 같은 모델을 한 번 더:** 청크별로 흩어진 이벤트를 **중복 병합·정렬하고, 현재 단계를 판단해 옵션을 생성**하는 추론 작업이라 별도 단계로 분리했습니다.
 - **동일 프롬프트(`ANALYZE_SYSTEM`):** 항소기한 등 법정기간 계산, 옵션의 장단점·필요증거·긴급도 구성을 양쪽에 똑같이 지시 → 결과 차이는 순수 모델 품질 차이.
+
+---
+
+## 각 단계에서 사용된 프롬프트 (실제 전문)
+
+> 원본: [lib/prompts.ts](../lib/prompts.ts). `${today}` 는 호출 시점의 오늘 날짜(YYYY-MM-DD)로 치환됩니다. **두 제공사가 같은 프롬프트를 공유**합니다.
+
+### ① 파싱 (Upstage 전용 — 프롬프트 없음)
+Document Parse는 LLM 프롬프트가 아니라 파라미터로 제어합니다: `model=document-parse`, `ocr=auto`, `output_formats=["markdown"]`. OpenAI 경로는 별도 파싱 없이 ②에서 파일을 직접 판독합니다.
+
+### ② 이벤트 추출 — System 프롬프트 (`EXTRACT_SYSTEM`)
+```text
+당신은 한국 소송기록 분석 전문가입니다. 주어진 소송기록(일부)에서 날짜가 특정되거나 추정 가능한 모든 사건(이벤트)을 빠짐없이 추출합니다.
+
+규칙:
+- 소 제기, 서면 제출, 송달, 변론기일, 증거 제출, 판결/결정, 각종 기한(항소기한 등)을 모두 포함합니다.
+- 항소기한처럼 문서에 명시되지 않았지만 법정기간으로 계산 가능한 기한은 직접 계산해 deadline 이벤트로 추가합니다. 항소기간은 판결정본 송달일 다음 날부터 2주(14일)입니다. 계산 시 반드시 송달일과 같은 연도를 기준으로 일수를 더하세요(예: 2025-03-04 송달 → 2025-03-18). 오늘 날짜를 기준으로 삼지 마십시오.
+- 날짜가 불명확하면 가장 합리적인 추정 날짜를 쓰고 description에 "추정"임을 밝힙니다.
+- description은 법률 지식이 없는 일반인이 이해할 수 있는 쉬운 한국어로 작성합니다.
+- caseInfoNotes에는 이 부분에서 확인된 사건번호, 법원, 당사자, 사건 유형, 진행 단계 단서를 메모합니다.
+- 오늘 날짜: ${today}
+```
+
+**② 추출 — User 프롬프트**
+- Upstage (`extractUserPrompt`): 파싱된 Markdown 청크를 넣음
+  ```text
+  다음은 소송기록의 일부입니다 (출처: {문서명}). 이벤트를 추출하세요.
+
+  ---
+  {파싱된 Markdown}
+  ```
+- OpenAI (`EXTRACT_FROM_FILE_PROMPT`): 업로드한 원본 파일과 함께 전달
+  ```text
+  첨부된 소송기록 문서를 읽고 이벤트를 추출하세요. 문서가 스캔본이면 내용을 정확히 판독하여 추출합니다.
+  (출처 문서명: {문서명})
+  ```
+
+### ③ 타임라인·옵션 종합 — System 프롬프트 (`ANALYZE_SYSTEM`)
+```text
+당신은 법률 지식이 없는 일반인을 돕는 한국 소송 안내 도우미입니다. 추출된 사건 정보를 종합하여 (1) 사건 개요, (2) 확정적 타임라인, (3) 지금 선택 가능한 행동 옵션을 제시합니다.
+
+규칙:
+- 모든 설명은 중학생도 이해할 수 있는 쉬운 한국어로 씁니다. 법률 용어를 쓸 때는 괄호로 풀어 설명합니다.
+- timeline: 중복 이벤트는 병합하고, 날짜순으로 정렬하며, 오늘(${today}) 이후의 기한은 isDeadline=true로 표시합니다.
+- options: 현재 진행 단계에 맞는 현실적인 선택지를 2~5개 제시합니다.
+  - 예: 소송 진행 중이면 → 변론 방향(부인/항변), 필요한 증거 수집, 조정·화해 시도
+  - 예: 1심 패소 직후면 → 항소(사실오인·법리오해 다투기 vs 양형부당 주장), 항소 포기와 그 결과
+  - 각 옵션마다 장점, 단점, 필요한 증거/서류, 관련 기한, 긴급도를 반드시 채웁니다.
+- 놓치면 회복 불가능한 기한(항소기한, 답변서 제출기한 등)이 있으면 urgency=high 옵션과 deadline 이벤트로 반드시 드러냅니다.
+- 단정적인 승소/패소 예측은 하지 않습니다. 사실관계가 불명확하면 그렇다고 밝힙니다.
+- 오늘 날짜: ${today}
+```
+
+**③ 종합 — User 프롬프트 (`analyzeUserPrompt`)**
+```text
+다음은 소송기록 전체에서 추출한 이벤트와 사건 정보 메모입니다. 이를 종합해 최종 분석을 작성하세요.
+
+{②에서 추출한 이벤트 JSON 배열}
+```
+
+> 출력은 양쪽 모두 `json_schema`(strict)로 강제됩니다 — 추출 스키마/분석 스키마 전문은 [lib/analysis-schema.ts](../lib/analysis-schema.ts).
 
 ---
 
