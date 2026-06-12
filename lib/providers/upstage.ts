@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import OpenAI from "openai";
-import { caseFilesDir } from "../store";
+import { caseFilesDir, caseDir } from "../store";
 import type { CaseAnalysis, CaseFile } from "../types";
 import { extractionSchema, analysisSchema } from "../analysis-schema";
 import { EXTRACT_SYSTEM, extractUserPrompt, ANALYZE_SYSTEM, analyzeUserPrompt } from "../prompts";
@@ -35,12 +35,29 @@ export const upstageProvider: PipelineProvider = {
     const t0 = Date.now();
 
     // ① 문서 파싱 (Document Parse)
+    // OCR은 페이지당 과금되므로 결과 Markdown을 디스크에 캐시한다.
+    // '다시 분석'(분석 단계만 재시도) 시 OCR을 다시 돌리지 않아 비용·시간을 아낀다.
+    const parseCacheDir = path.join(caseDir(caseId), "parsed");
+    await fs.mkdir(parseCacheDir, { recursive: true });
+    let cacheHits = 0;
     const parsedDocs: { label: string; markdown: string }[] = [];
     for (const [i, file] of files.entries()) {
+      const cachePath = path.join(parseCacheDir, `${file.storedName}.md`);
+      const cached = await fs.readFile(cachePath, "utf-8").catch(() => null);
+      if (cached !== null) {
+        cacheHits++;
+        await onProgress("parsing", `파싱 결과 재사용 (${i + 1}/${files.length}): ${file.name}`);
+        parsedDocs.push({ label: file.name, markdown: cached });
+        continue;
+      }
       await onProgress("parsing", `문서 파싱 중 (${i + 1}/${files.length}): ${file.name}`);
       const filePath = path.join(caseFilesDir(caseId), file.storedName);
       const markdown = await parseDocument(apiKey, filePath, file.name);
+      await fs.writeFile(cachePath, markdown);
       parsedDocs.push({ label: file.name, markdown });
+    }
+    if (cacheHits > 0) {
+      notes.push(`${cacheHits}개 문서는 기존 OCR 결과를 재사용했습니다 (재파싱 없음 → 페이지 과금 없음).`);
     }
     const parseMs = Date.now() - t0;
 
