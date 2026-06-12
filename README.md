@@ -23,6 +23,8 @@ npm run dev            # http://localhost:3000
 
 두 파이프라인은 동일한 프롬프트([lib/prompts.ts](lib/prompts.ts))와 동일한 출력 스키마([lib/analysis-schema.ts](lib/analysis-schema.ts))를 사용해 공정하게 비교합니다.
 
+**어떤 API를 어느 단계에서, 왜 골랐는지**는 [docs/API-DECISIONS.md](docs/API-DECISIONS.md)에 정리돼 있습니다.
+
 ## 구조
 
 ```
