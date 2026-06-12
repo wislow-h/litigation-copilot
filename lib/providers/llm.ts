@@ -14,10 +14,13 @@ export async function chatJSON<T>(
     { role: "system" as const, content: system },
     { role: "user" as const, content: user },
   ];
+  // temperature 0: 동일 입력에 대한 추출/분석 결과의 실행 간 편차를 줄인다
+  // (편차가 크면 같은 기록인데 판결문 누락 등으로 결과가 흔들림)
   try {
     const res = await client.chat.completions.create({
       model,
       messages,
+      temperature: 0,
       response_format: {
         type: "json_schema",
         json_schema: { name: schemaName, schema, strict: true },
@@ -28,6 +31,7 @@ export async function chatJSON<T>(
     if (!isSchemaUnsupported(e)) throw e;
     const res = await client.chat.completions.create({
       model,
+      temperature: 0,
       messages: [
         { role: "system", content: system },
         {
