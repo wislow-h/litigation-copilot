@@ -1,5 +1,5 @@
 import { getCase, updatePipeline } from "./store";
-import type { ProviderName } from "./types";
+import type { CaseMeta, PipelineStatus, ProviderName } from "./types";
 import type { PipelineProvider } from "./providers/types";
 import { upstageProvider } from "./providers/upstage";
 import { openaiProvider } from "./providers/openai";
@@ -8,6 +8,38 @@ export const PROVIDERS: Record<ProviderName, PipelineProvider> = {
   upstage: upstageProvider,
   openai: openaiProvider,
 };
+
+// 현재 프로세스에서 실제로 돌고 있는 작업들. 키: `${caseId}:${provider}`.
+// 서버가 재시작되면 이 Set은 비워지므로, meta에는 진행중이라 적혀 있지만
+// 여기에 없는 파이프라인 = 재시작으로 끊긴 고아 작업으로 판단할 수 있다.
+const liveRuns = new Set<string>();
+const runKey = (caseId: string, name: ProviderName) => `${caseId}:${name}`;
+
+const IN_PROGRESS: PipelineStatus[] = ["queued", "parsing", "analyzing"];
+
+/**
+ * 서버 재시작 등으로 끊긴 '진행중' 파이프라인을 '오류'로 정리한다.
+ * (실제 실행중인 작업은 liveRuns에 있으므로 건드리지 않는다.)
+ * 조회 시점에 호출 → 멈춰 보이던 작업에 '다시 분석' 버튼이 뜨게 된다.
+ */
+export async function reconcileOrphans(meta: CaseMeta): Promise<CaseMeta> {
+  const orphans = (Object.keys(meta.pipelines) as ProviderName[]).filter((name) => {
+    const st = meta.pipelines[name]?.status;
+    return st && IN_PROGRESS.includes(st) && !liveRuns.has(runKey(meta.id, name));
+  });
+  if (orphans.length === 0) return meta;
+
+  let updated = meta;
+  for (const name of orphans) {
+    updated = await updatePipeline(meta.id, name, {
+      status: "error",
+      detail: undefined,
+      error: "서버가 재시작되어 분석이 중단되었습니다. '다시 분석'을 눌러 재시도해 주세요.",
+      finishedAt: new Date().toISOString(),
+    });
+  }
+  return updated;
+}
 
 export function availableProviders(): { name: ProviderName; label: string; available: boolean }[] {
   return (Object.values(PROVIDERS) as PipelineProvider[]).map((p) => ({
@@ -31,6 +63,16 @@ export function startAnalysis(caseId: string, providers: ProviderName[]) {
 
 export async function runProvider(caseId: string, name: ProviderName) {
   const provider = PROVIDERS[name];
+  // 첫 await 이전에 등록해야 조회 시점의 오인 정리(reconcile)와 경합하지 않는다
+  liveRuns.add(runKey(caseId, name));
+  try {
+    await runProviderInner(caseId, name, provider);
+  } finally {
+    liveRuns.delete(runKey(caseId, name));
+  }
+}
+
+async function runProviderInner(caseId: string, name: ProviderName, provider: PipelineProvider) {
   const meta = await getCase(caseId);
   if (!meta) return;
 

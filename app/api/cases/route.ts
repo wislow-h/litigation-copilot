@@ -5,7 +5,7 @@ import path from "path";
 import { Readable } from "stream";
 import Busboy from "busboy";
 import { createCase, caseFilesDir, updateCase, listCases, deleteCase } from "@/lib/store";
-import { startAnalysis } from "@/lib/pipeline";
+import { startAnalysis, reconcileOrphans } from "@/lib/pipeline";
 import type { CaseFile, ProviderName } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -17,7 +17,8 @@ const ALLOWED_EXTS = new Set([
 ]);
 
 export async function GET() {
-  return NextResponse.json(await listCases());
+  const cases = await listCases();
+  return NextResponse.json(await Promise.all(cases.map(reconcileOrphans)));
 }
 
 // 대용량 업로드: 요청 본문을 busboy로 스트리밍하여 디스크에 직접 기록 (메모리 적재 없음)
