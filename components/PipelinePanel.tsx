@@ -4,16 +4,25 @@ import type { PipelineState, ProviderName } from "@/lib/types";
 import Timeline from "./Timeline";
 import OptionCard from "./OptionCard";
 
-const PROVIDER_META: Record<ProviderName, { title: string; sub: string; accent: string }> = {
+const PROVIDER_META: Record<
+  ProviderName,
+  { title: string; sub: string; accent: string; bar: string; parseLabel: string; analyzeLabel: string }
+> = {
   upstage: {
     title: "Upstage",
     sub: "Document Parse → Solar Pro 3",
     accent: "border-t-purple-500",
+    bar: "bg-purple-500",
+    parseLabel: "문서 파싱 · OCR (Document Parse)",
+    analyzeLabel: "추출 · 분석 (Solar Pro 3)",
   },
   openai: {
     title: "OpenAI",
     sub: "Files API → Responses (GPT-5.5)",
     accent: "border-t-emerald-500",
+    bar: "bg-emerald-500",
+    parseLabel: "파일 준비 · 업로드 (Files API)",
+    analyzeLabel: "판독 · 추출 · 분석 (GPT-5.5)",
   },
 };
 
@@ -56,14 +65,9 @@ export default function PipelinePanel({
           <p className="text-xs text-slate-400">{meta.sub}</p>
         </div>
         {state.status === "done" && state.metrics && (
-          <div className="text-right text-xs text-slate-500">
-            <p>
-              파싱 {fmtMs(state.metrics.parseMs)} · 분석 {fmtMs(state.metrics.analyzeMs)} ·{" "}
-              <span className="font-semibold text-slate-700">총 {fmtMs(state.metrics.totalMs)}</span>
-            </p>
-            <p>
-              이벤트 {state.metrics.eventCount}개 · 옵션 {state.metrics.optionCount}개
-            </p>
+          <div className="rounded-lg bg-slate-100 px-3 py-1 text-right text-xs">
+            <span className="text-slate-400">총 처리시간</span>{" "}
+            <span className="font-bold text-slate-700">{fmtMs(state.metrics.totalMs)}</span>
           </div>
         )}
         {(state.status === "error" || state.status === "done") && (
@@ -126,6 +130,50 @@ export default function PipelinePanel({
 
         {state.status === "done" && state.result && (
           <div className="space-y-6">
+            {/* 단계별 처리 시간 */}
+            {state.metrics && (
+              <section className="rounded-xl border border-slate-200 p-4">
+                <div className="mb-3 flex items-baseline justify-between">
+                  <h3 className="text-sm font-semibold">⏱️ 단계별 처리 시간</h3>
+                  <span className="text-xs text-slate-400">
+                    이벤트 {state.metrics.eventCount}개 · 옵션 {state.metrics.optionCount}개
+                  </span>
+                </div>
+                {(() => {
+                  const { parseMs, analyzeMs, totalMs } = state.metrics;
+                  const rows = [
+                    { label: meta.parseLabel, ms: parseMs },
+                    { label: meta.analyzeLabel, ms: analyzeMs },
+                  ];
+                  const max = Math.max(parseMs, analyzeMs, 1);
+                  return (
+                    <div className="space-y-2">
+                      {rows.map((r) => (
+                        <div key={r.label} className="flex items-center gap-3">
+                          <span className="w-44 shrink-0 truncate text-xs text-slate-500" title={r.label}>
+                            {r.label}
+                          </span>
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className={`h-full rounded-full ${meta.bar}`}
+                              style={{ width: `${Math.max(3, (r.ms / max) * 100)}%` }}
+                            />
+                          </div>
+                          <span className="w-16 shrink-0 text-right text-xs font-medium tabular-nums text-slate-700">
+                            {fmtMs(r.ms)}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="mt-1 flex justify-between border-t border-slate-100 pt-2 text-sm">
+                        <span className="font-semibold text-slate-600">총 처리 시간</span>
+                        <span className="font-bold tabular-nums text-slate-900">{fmtMs(totalMs)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </section>
+            )}
+
             {/* 사건 개요 */}
             <section className="rounded-xl bg-slate-50 p-4">
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
