@@ -2,44 +2,61 @@ import OpenAI from "openai";
 
 // 구조화 출력 헬퍼: json_schema response_format을 시도하고,
 // 제공사가 거부하면(400 등) JSON-only 지시 프롬프트로 폴백한다.
+export interface ChatJSONOptions {
+  // 요청 하나가 멈췄을(hang) 때 통째로 매달리지 않도록 거는 상한.
+  timeoutMs?: number;
+  maxRetries?: number;
+}
+
 export async function chatJSON<T>(
   client: OpenAI,
   model: string,
   system: string,
   user: string,
   schemaName: string,
-  schema: Record<string, unknown>
+  schema: Record<string, unknown>,
+  opts: ChatJSONOptions = {}
 ): Promise<T> {
   const messages = [
     { role: "system" as const, content: system },
     { role: "user" as const, content: user },
   ];
+  // 요청별 타임아웃/재시도 — 한 청크가 hang 걸려도 빨리 끊어 넘어가게 한다
+  const reqOpts: { timeout?: number; maxRetries?: number } = {};
+  if (opts.timeoutMs) reqOpts.timeout = opts.timeoutMs;
+  if (opts.maxRetries !== undefined) reqOpts.maxRetries = opts.maxRetries;
   // temperature 0: 동일 입력에 대한 추출/분석 결과의 실행 간 편차를 줄인다
   // (편차가 크면 같은 기록인데 판결문 누락 등으로 결과가 흔들림)
   try {
-    const res = await client.chat.completions.create({
-      model,
-      messages,
-      temperature: 0,
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: schemaName, schema, strict: true },
+    const res = await client.chat.completions.create(
+      {
+        model,
+        messages,
+        temperature: 0,
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: schemaName, schema, strict: true },
+        },
       },
-    });
+      reqOpts
+    );
     return parseJSON<T>(res.choices[0]?.message?.content ?? "");
   } catch (e) {
     if (!isSchemaUnsupported(e)) throw e;
-    const res = await client.chat.completions.create({
-      model,
-      temperature: 0,
-      messages: [
-        { role: "system", content: system },
-        {
-          role: "user",
-          content: `${user}\n\n반드시 다음 JSON 스키마를 만족하는 JSON만 출력하세요(설명·코드펜스 금지):\n${JSON.stringify(schema)}`,
-        },
-      ],
-    });
+    const res = await client.chat.completions.create(
+      {
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: system },
+          {
+            role: "user",
+            content: `${user}\n\n반드시 다음 JSON 스키마를 만족하는 JSON만 출력하세요(설명·코드펜스 금지):\n${JSON.stringify(schema)}`,
+          },
+        ],
+      },
+      reqOpts
+    );
     return parseJSON<T>(res.choices[0]?.message?.content ?? "");
   }
 }

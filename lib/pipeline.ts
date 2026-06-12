@@ -12,7 +12,11 @@ export const PROVIDERS: Record<ProviderName, PipelineProvider> = {
 // 현재 프로세스에서 실제로 돌고 있는 작업들. 키: `${caseId}:${provider}`.
 // 서버가 재시작되면 이 Set은 비워지므로, meta에는 진행중이라 적혀 있지만
 // 여기에 없는 파이프라인 = 재시작으로 끊긴 고아 작업으로 판단할 수 있다.
-const liveRuns = new Set<string>();
+//
+// globalThis에 보관: Next.js dev는 라우트별로 모듈 인스턴스를 분리할 수 있어
+// 모듈 지역 변수로 두면 POST(실행)와 GET(조회)이 서로 다른 Set을 보게 된다.
+const g = globalThis as unknown as { __litLiveRuns?: Set<string> };
+const liveRuns = (g.__litLiveRuns ??= new Set<string>());
 const runKey = (caseId: string, name: ProviderName) => `${caseId}:${name}`;
 
 const IN_PROGRESS: PipelineStatus[] = ["queued", "parsing", "analyzing"];

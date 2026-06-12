@@ -11,8 +11,13 @@ import { finalizeAnalysis } from "./types";
 
 const BASE_URL = "https://api.upstage.ai/v1";
 const LLM_MODEL = process.env.UPSTAGE_LLM_MODEL || "solar-pro3";
-// Solar Pro 3 컨텍스트 128K 토큰. 한국어는 글자당 토큰 소모가 크므로 보수적으로 잡는다.
-const CHUNK_CHARS = 60_000;
+// Solar Pro 3 컨텍스트는 128K 토큰이지만, 청크가 너무 크면 결과 JSON 생성이
+// 길어지며 간헐적으로 응답이 멈추는(hang) 경우가 있어 보수적으로 24K자로 자른다.
+const CHUNK_CHARS = 24_000;
+// 청크 추출은 정상이면 수 초면 끝난다. 한 요청이 멈춰도 3분이면 끊고 다음으로 넘어간다.
+// 멈춤(타임아웃)은 재시도해도 또 멈추므로 재시도 0회 — 빨리 건너뛰는 게 낫다.
+const CHUNK_TIMEOUT_MS = 3 * 60 * 1000;
+const CHUNK_MAX_RETRIES = 0;
 const PARSE_POLL_INTERVAL_MS = 3_000;
 const PARSE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -55,6 +60,7 @@ export const upstageProvider: PipelineProvider = {
     let failedChunks = 0;
     for (const [i, chunk] of chunks.entries()) {
       await onProgress("analyzing", `이벤트 추출 중 (${i + 1}/${chunks.length} 청크)`);
+      const started = Date.now();
       try {
         extracted.push(
           await chatJSON<ExtractionChunk>(
@@ -62,13 +68,15 @@ export const upstageProvider: PipelineProvider = {
             EXTRACT_SYSTEM,
             extractUserPrompt(chunk.label, chunk.text),
             "extraction",
-            extractionSchema as unknown as Record<string, unknown>
+            extractionSchema as unknown as Record<string, unknown>,
+            { timeoutMs: CHUNK_TIMEOUT_MS, maxRetries: CHUNK_MAX_RETRIES }
           )
         );
+        console.log(`[upstage] 청크 ${i + 1}/${chunks.length} 추출 완료 (${((Date.now() - started) / 1000).toFixed(1)}s)`);
       } catch (e) {
-        // 한 청크가 끝내 실패해도 나머지로 분석을 이어간다 (대용량 견고성)
+        // 한 청크가 끝내 실패(타임아웃·연결 끊김 등)해도 나머지로 분석을 이어간다
         failedChunks++;
-        console.error(`[upstage] 청크 ${i + 1}/${chunks.length} 추출 실패`, e);
+        console.error(`[upstage] 청크 ${i + 1}/${chunks.length} 추출 실패 (${((Date.now() - started) / 1000).toFixed(1)}s)`, e);
       }
     }
     if (failedChunks > 0) {
