@@ -12,6 +12,8 @@ export default function CasePage({ params }: { params: Promise<{ id: string }> }
   const router = useRouter();
   const [meta, setMeta] = useState<CaseMeta | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/cases/${id}`, { cache: "no-store" });
@@ -61,6 +63,21 @@ export default function CasePage({ params }: { params: Promise<{ id: string }> }
     router.push("/");
   }
 
+  async function saveTitle() {
+    const next = titleDraft.trim();
+    if (!next || next === meta?.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setMeta((m) => (m ? { ...m, title: next } : m)); // 낙관적 업데이트
+    setEditingTitle(false);
+    await fetch(`/api/cases/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: next }),
+    });
+  }
+
   if (notFound) {
     return (
       <div className="py-20 text-center text-slate-500">
@@ -79,7 +96,37 @@ export default function CasePage({ params }: { params: Promise<{ id: string }> }
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <a href="/" className="text-sm text-slate-400 hover:text-indigo-600">← 홈</a>
-          <h1 className="text-2xl font-bold">{meta.title}</h1>
+          {editingTitle ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveTitle();
+                  if (e.key === "Escape") setEditingTitle(false);
+                }}
+                maxLength={200}
+                className="w-72 rounded-lg border border-indigo-300 px-2 py-1 text-2xl font-bold focus:outline-none"
+              />
+              <button onClick={saveTitle} className="rounded-md bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-700">저장</button>
+              <button onClick={() => setEditingTitle(false)} className="rounded-md border border-slate-200 px-3 py-1 text-sm text-slate-500 hover:bg-slate-50">취소</button>
+            </div>
+          ) : (
+            <h1 className="group flex items-center gap-2 text-2xl font-bold">
+              {meta.title}
+              <button
+                onClick={() => {
+                  setTitleDraft(meta.title);
+                  setEditingTitle(true);
+                }}
+                title="제목 수정"
+                className="text-base text-slate-300 opacity-0 transition group-hover:opacity-100 hover:text-indigo-600"
+              >
+                ✏️
+              </button>
+            </h1>
+          )}
           <p className="text-xs text-slate-400">
             {new Date(meta.createdAt).toLocaleString("ko-KR")} ·{" "}
             {meta.files.map((f) => f.name).join(", ")}
