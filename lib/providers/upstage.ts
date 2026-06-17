@@ -14,10 +14,12 @@ const LLM_MODEL = process.env.UPSTAGE_LLM_MODEL || "solar-pro3";
 // Solar Pro 3 컨텍스트는 128K 토큰이지만, 청크가 너무 크면 결과 JSON 생성이
 // 길어지며 간헐적으로 응답이 멈추는(hang) 경우가 있어 보수적으로 24K자로 자른다.
 const CHUNK_CHARS = 24_000;
-// 청크 추출은 정상이면 수 초면 끝난다. 한 요청이 멈춰도 3분이면 끊고 다음으로 넘어간다.
-// 멈춤(타임아웃)은 재시도해도 또 멈추므로 재시도 0회 — 빨리 건너뛰는 게 낫다.
-const CHUNK_TIMEOUT_MS = 3 * 60 * 1000;
-const CHUNK_MAX_RETRIES = 0;
+// 청크 추출은 정상이면 수 초~수십 초면 끝난다. Solar가 간헐적으로 응답을
+// 멈추는(transient hang) 경우가 있는데, 같은 청크를 다시 보내면 대개 바로 성공한다.
+// → 멈추면 버리지 말고 재시도해서 그 구간을 반드시 복구한다 (문서 전체 분석 보장).
+// 한 시도는 2분에서 끊고, 최대 4번(최초+재시도 3)까지 시도한다.
+const CHUNK_TIMEOUT_MS = 2 * 60 * 1000;
+const CHUNK_MAX_RETRIES = 3;
 const PARSE_POLL_INTERVAL_MS = 3_000;
 const PARSE_TIMEOUT_MS = 10 * 60 * 1000;
 
